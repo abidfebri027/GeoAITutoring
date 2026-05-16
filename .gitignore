@@ -1,0 +1,30 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# n8n local/runtime data
+.n8n/
+n8n-local/
+
+# Logs
+*.log
+logs/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node/Python caches if helper scripts are added later
+node_modules/
+__pycache__/
+.pytest_cache/
+.cache/
+
+# Build/output folders
+dist/
+build/
+coverage/
+

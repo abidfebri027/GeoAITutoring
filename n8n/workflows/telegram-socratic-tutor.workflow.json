@@ -1,0 +1,487 @@
+{
+  "name": "Telegram Socratic Geography Disaster Tutor",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "0b24c2d1-2a91-4c2b-a9bc-telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const update = $json;\nconst message = update.message || update.edited_message || {};\nconst from = message.from || {};\nconst chat = message.chat || {};\n\nconst rawText = message.text || message.caption || '';\nconst text = rawText.trim().slice(0, 2000);\n\nif (!text) {\n  return [{\n    json: {\n      ignore: true,\n      reason: 'empty_or_non_text_message',\n      telegram_update_id: update.update_id || null,\n      telegram_chat_id: chat.id ? String(chat.id) : null\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ignore: false,\n    telegram_update_id: update.update_id || null,\n    telegram_message_id: message.message_id ? String(message.message_id) : null,\n    telegram_user_id: from.id ? String(from.id) : null,\n    telegram_chat_id: chat.id ? String(chat.id) : null,\n    telegram_username: from.username || null,\n    first_name: from.first_name || null,\n    last_name: from.last_name || null,\n    student_display_name: [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || 'Telegram Student',\n    message_text: text,\n    is_start: text === '/start',\n    received_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "52e9457b-5072-4e66-8e12-normalize",
+      "name": "Normalize Telegram Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.ignore}}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "91b04854-a899-49f2-9d04-ignore-check",
+      "name": "Has Text Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from get_or_create_telegram_student($1, $2, $3, $4, $5);",
+        "options": {
+          "queryReplacement": "={{[\n  $node[\"Normalize Telegram Input\"].json.telegram_user_id,\n  $node[\"Normalize Telegram Input\"].json.telegram_chat_id,\n  $node[\"Normalize Telegram Input\"].json.telegram_username,\n  $node[\"Normalize Telegram Input\"].json.first_name,\n  $node[\"Normalize Telegram Input\"].json.last_name\n]}}"
+        }
+      },
+      "id": "81faf22b-2c92-49fa-8bb3-register-student",
+      "name": "Get Or Create Student",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        760,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select get_or_create_active_session($1, $2, 'geography_disasters') as session_id;",
+        "options": {
+          "queryReplacement": "={{[\n  $node[\"Get Or Create Student\"].json.student_id,\n  $node[\"Normalize Telegram Input\"].json.telegram_chat_id\n]}}"
+        }
+      },
+      "id": "31a9386b-2d8f-4966-93cc-session",
+      "name": "Get Active Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1000,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into chat_messages (session_id, student_id, telegram_message_id, role, content, metadata) values ($1, $2, $3, 'student', $4, jsonb_build_object('telegram_update_id', $5)) returning id as student_message_id;",
+        "options": {
+          "queryReplacement": "={{[\n  $node[\"Get Active Session\"].json.session_id,\n  $node[\"Get Or Create Student\"].json.student_id,\n  $node[\"Normalize Telegram Input\"].json.telegram_message_id,\n  $node[\"Normalize Telegram Input\"].json.message_text,\n  $node[\"Normalize Telegram Input\"].json.telegram_update_id\n]}}"
+        }
+      },
+      "id": "a6295ce4-dc77-4f6e-aecd-save-student-message",
+      "name": "Save Student Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1240,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with recent_messages as (\n  select role, content, tutor_action, created_at\n  from chat_messages\n  where student_id = $1\n  order by created_at desc\n  limit 12\n), mastery as (\n  select c.code, c.title, scm.mastery_score, scm.confidence_score, scm.misconception_count, scm.hints_used_total, scm.attempts_total\n  from student_concept_mastery scm\n  join concepts c on c.id = scm.concept_id\n  where scm.student_id = $1\n  order by scm.updated_at desc\n  limit 1\n)\nselect\n  $1::uuid as student_id,\n  $2::uuid as session_id,\n  $3::text as telegram_chat_id,\n  $4::text as telegram_message_id,\n  $5::text as message_text,\n  $6::uuid as student_message_id,\n  coalesce((select jsonb_agg(to_jsonb(rm) order by rm.created_at asc) from recent_messages rm), '[]'::jsonb) as chat_history,\n  coalesce((select code from mastery limit 1), 'natural_hazards') as current_concept_code,\n  coalesce((select title from mastery limit 1), 'Natural hazards') as current_concept_title,\n  coalesce((select mastery_score from mastery limit 1), 0) as mastery_score,\n  coalesce((select confidence_score from mastery limit 1), 0) as confidence_score,\n  coalesce((select misconception_count from mastery limit 1), 0) as misconception_count,\n  coalesce((select hints_used_total from mastery limit 1), 0) as hints_in_session,\n  coalesce((select attempts_total from mastery limit 1), 0) as attempts_total,\n  '[]'::jsonb as rag_context;",
+        "options": {
+          "queryReplacement": "={{[\n  $node[\"Get Or Create Student\"].json.student_id,\n  $node[\"Get Active Session\"].json.session_id,\n  $node[\"Normalize Telegram Input\"].json.telegram_chat_id,\n  $node[\"Normalize Telegram Input\"].json.telegram_message_id,\n  $node[\"Normalize Telegram Input\"].json.message_text,\n  $node[\"Save Student Message\"].json.student_message_id\n]}}"
+        }
+      },
+      "id": "8f14a38d-977e-4124-9bfa-load-context",
+      "name": "Load Tutor Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1480,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst message = (data.message_text || '').toLowerCase();\nconst mastery = Number(data.mastery_score ?? 0);\nconst hintsInSession = Number(data.hints_in_session ?? 0);\nconst misconceptionCount = Number(data.misconception_count ?? 0);\nconst attempts = Number(data.attempts_total ?? 0);\n\nconst asksDirectAnswer =\n  message.includes('answer') ||\n  message.includes('tell me') ||\n  message.includes('what is') ||\n  message.includes('why') ||\n  message.includes('explain');\n\nconst expressesConfusion =\n  message.includes(\"don't understand\") ||\n  message.includes('dont understand') ||\n  message.includes('confused') ||\n  message.includes('stuck') ||\n  message.includes('help');\n\nlet allowedAction = 'ask_guiding_question';\nlet reason = 'default_socratic_turn';\n\nif (misconceptionCount > 0 && attempts > 0) {\n  allowedAction = 'correct_misconception';\n  reason = 'active_misconception';\n} else if (mastery >= 0.78 && attempts >= 2) {\n  allowedAction = 'assess';\n  reason = 'mastery_ready_for_check';\n} else if (expressesConfusion && hintsInSession < 2) {\n  allowedAction = 'give_hint';\n  reason = 'student_confused_low_hint_count';\n} else if (expressesConfusion && hintsInSession >= 2) {\n  allowedAction = 'micro_explain';\n  reason = 'student_stuck_after_multiple_hints';\n} else if (asksDirectAnswer && mastery < 0.70) {\n  allowedAction = 'ask_guiding_question';\n  reason = 'prevent_full_answer_too_early';\n} else if (mastery >= 0.60 && mastery < 0.78) {\n  allowedAction = 'give_hint';\n  reason = 'moderate_mastery_prompt_next_step';\n}\n\nreturn [{\n  json: {\n    ...data,\n    allowed_action: allowedAction,\n    policy_reason: reason,\n    tutor_constraints: {\n      max_questions: 1,\n      reveal_full_answer: ['micro_explain', 'final_explain'].includes(allowedAction),\n      telegram_concise: true\n    }\n  }\n}];"
+      },
+      "id": "25ee4a0f-b182-4efa-bfb3-policy",
+      "name": "Compute Pedagogy Policy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4.1-mini\",\n  \"temperature\": 0.4,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a Socratic geography tutor for natural-disaster learning. Do not reveal the full answer early. Ask one focused question at a time. Keep Telegram replies concise. Return JSON only with keys: reply, tutor_action, target_concept, misconception_detected, hint_level, confidence_estimate, should_assess_next.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Student profile: Telegram learner\\nCurrent concept: {{$json.current_concept_code}} - {{$json.current_concept_title}}\\nMastery score: {{$json.mastery_score}}\\nConfidence score: {{$json.confidence_score}}\\nRecent chat JSON: {{JSON.stringify($json.chat_history)}}\\nRetrieved context JSON: {{JSON.stringify($json.rag_context)}}\\nAllowed tutor action: {{$json.allowed_action}}\\nPolicy reason: {{$json.policy_reason}}\\nStudent message: {{$json.message_text}}\"\n    }\n  ]\n}"
+      },
+      "id": "c8c33af8-35df-4051-a8a4-tutor-llm",
+      "name": "Socratic Tutor LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        -120
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const llm = $input.first().json;\nconst context = $node['Compute Pedagogy Policy'].json;\n\nfunction extractText(payload) {\n  if (typeof payload === 'string') return payload;\n  if (payload?.choices?.[0]?.message?.content) return payload.choices[0].message.content;\n  if (payload?.output_text) return payload.output_text;\n  if (payload?.text) return payload.text;\n  return JSON.stringify(payload);\n}\n\nconst raw = extractText(llm);\nlet parsed;\n\ntry {\n  parsed = JSON.parse(raw);\n} catch (error) {\n  parsed = {\n    reply: raw,\n    tutor_action: context.allowed_action || 'ask_guiding_question',\n    target_concept: context.current_concept_code || 'natural_hazards',\n    misconception_detected: null,\n    hint_level: 0,\n    confidence_estimate: 0.5,\n    should_assess_next: false,\n    parse_warning: error.message\n  };\n}\n\nconst reply = String(parsed.reply || 'Let us reason through it one step at a time. What do you already know about this hazard?').slice(0, 3500);\n\nreturn [{\n  json: {\n    ...context,\n    tutor_raw_output: raw,\n    tutor_reply: reply,\n    tutor_action: parsed.tutor_action || context.allowed_action || 'ask_guiding_question',\n    target_concept: parsed.target_concept || context.current_concept_code || 'natural_hazards',\n    misconception_detected: parsed.misconception_detected || null,\n    hint_level: Number(parsed.hint_level || 0),\n    confidence_estimate: Number(parsed.confidence_estimate ?? 0.5),\n    should_assess_next: Boolean(parsed.should_assess_next)\n  }\n}];"
+      },
+      "id": "ee9c0f04-4712-4792-a6ab-parse-tutor",
+      "name": "Parse Tutor Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.telegram_chat_id}}",
+        "text": "={{$json.tutor_reply}}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "089100a4-419a-4ce8-bc97-send-telegram",
+      "name": "Send Telegram Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2440,
+        -120
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into chat_messages (session_id, student_id, role, content, tutor_action, metadata) values ($1, $2, 'assistant', $3, $4, jsonb_build_object('target_concept', $5, 'misconception_detected', $6, 'hint_level', $7, 'confidence_estimate', $8)) returning id as assistant_message_id;",
+        "options": {
+          "queryReplacement": "={{[\n  $node[\"Parse Tutor Output\"].json.session_id,\n  $node[\"Parse Tutor Output\"].json.student_id,\n  $node[\"Parse Tutor Output\"].json.tutor_reply,\n  $node[\"Parse Tutor Output\"].json.tutor_action,\n  $node[\"Parse Tutor Output\"].json.target_concept,\n  $node[\"Parse Tutor Output\"].json.misconception_detected,\n  $node[\"Parse Tutor Output\"].json.hint_level,\n  $node[\"Parse Tutor Output\"].json.confidence_estimate\n]}}"
+        }
+      },
+      "id": "f0aa0b5a-e8a5-4ee6-a6bf-save-assistant",
+      "name": "Save Assistant Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2680,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4.1-mini\",\n  \"temperature\": 0,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Evaluate the student's latest geography answer. Return JSON only with concept_code, conceptual_accuracy, reasoning_quality, use_of_evidence, confidence_calibration, independence, improvement, hints_used, misconceptions_detected, confidence_estimate, final_score, misconception_type, short_feedback. Scores must be 0 to 1.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Latest student message: {{$node['Parse Tutor Output'].json.message_text}}\\nTutor reply: {{$node['Parse Tutor Output'].json.tutor_reply}}\\nTarget concept: {{$node['Parse Tutor Output'].json.target_concept}}\\nTutor action: {{$node['Parse Tutor Output'].json.tutor_action}}\\nHint level: {{$node['Parse Tutor Output'].json.hint_level}}\\nMisconception detected: {{$node['Parse Tutor Output'].json.misconception_detected}}\\nRecent chat JSON: {{JSON.stringify($node['Parse Tutor Output'].json.chat_history)}}\"\n    }\n  ]\n}"
+      },
+      "id": "55b00f43-2c64-440a-bf6f-score-llm",
+      "name": "Scoring Evaluator LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2920,
+        -120
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const llm = $input.first().json;\nconst context = $node['Parse Tutor Output'].json;\n\nfunction extractText(payload) {\n  if (typeof payload === 'string') return payload;\n  if (payload?.choices?.[0]?.message?.content) return payload.choices[0].message.content;\n  if (payload?.output_text) return payload.output_text;\n  if (payload?.text) return payload.text;\n  return JSON.stringify(payload);\n}\n\nfunction clamp01(value) {\n  const n = Number(value);\n  if (Number.isNaN(n)) return 0;\n  return Math.min(1, Math.max(0, n));\n}\n\nconst raw = extractText(llm);\nlet parsed;\n\ntry {\n  parsed = JSON.parse(raw);\n} catch (error) {\n  parsed = {\n    concept_code: context.target_concept || 'natural_hazards',\n    conceptual_accuracy: 0,\n    reasoning_quality: 0,\n    use_of_evidence: 0,\n    confidence_calibration: 0,\n    independence: 0,\n    improvement: 0,\n    hints_used: context.hint_level || 0,\n    misconceptions_detected: context.misconception_detected ? 1 : 0,\n    confidence_estimate: context.confidence_estimate || 0.5,\n    final_score: 0,\n    misconception_type: context.misconception_detected || null,\n    short_feedback: 'Unable to parse scoring output.'\n  };\n}\n\nconst hintsUsed = Number(parsed.hints_used || context.hint_level || 0);\nconst misconceptionsDetected = Number(parsed.misconceptions_detected || (context.misconception_detected ? 1 : 0));\n\nlet finalScore = parsed.final_score;\nif (finalScore === undefined || finalScore === null) {\n  finalScore =\n    0.35 * clamp01(parsed.conceptual_accuracy) +\n    0.20 * clamp01(parsed.reasoning_quality) +\n    0.15 * clamp01(parsed.use_of_evidence) +\n    0.10 * clamp01(parsed.confidence_calibration) +\n    0.10 * clamp01(parsed.independence) +\n    0.10 * clamp01(parsed.improvement) -\n    0.05 * Math.min(hintsUsed, 3) / 3 -\n    0.10 * Math.min(misconceptionsDetected, 2) / 2;\n}\n\nreturn [{\n  json: {\n    ...context,\n    scoring_raw_output: raw,\n    assistant_message_id: $node['Save Assistant Message'].json.assistant_message_id,\n    score: {\n      concept_code: parsed.concept_code || context.target_concept || 'natural_hazards',\n      conceptual_accuracy: clamp01(parsed.conceptual_accuracy),\n      reasoning_quality: clamp01(parsed.reasoning_quality),\n      use_of_evidence: clamp01(parsed.use_of_evidence),\n      confidence_calibration: clamp01(parsed.confidence_calibration),\n      independence: clamp01(parsed.independence),\n      improvement: clamp01(parsed.improvement),\n      hints_used: hintsUsed,\n      misconceptions_detected: misconceptionsDetected,\n      confidence_estimate: clamp01(parsed.confidence_estimate ?? context.confidence_estimate ?? 0.5),\n      final_score: clamp01(finalScore),\n      misconception_type: parsed.misconception_type || context.misconception_detected || null,\n      short_feedback: parsed.short_feedback || null\n    }\n  }\n}];"
+      },
+      "id": "41cd305c-f71a-464f-ad83-parse-score",
+      "name": "Parse Score Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with concept_row as (\n  select id from concepts where code = $3\n), score_insert as (\n  insert into scoring_history (\n    student_id,\n    concept_id,\n    session_id,\n    message_id,\n    conceptual_accuracy,\n    reasoning_quality,\n    use_of_evidence,\n    confidence_calibration,\n    independence,\n    improvement,\n    hints_used,\n    misconceptions_detected,\n    final_score,\n    raw_evaluation\n  )\n  select $1, concept_row.id, $2, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb\n  from concept_row\n  returning id\n), mastery_update as (\n  select * from update_mastery_from_score($1, $3, $13, $15, $11, $12)\n), misconception_insert as (\n  insert into misconceptions (student_id, concept_id, misconception_type, evidence_message_id, severity, remediation_notes)\n  select $1, concept_row.id, $16, $4, 2, $17\n  from concept_row\n  where $16 is not null and $16 <> ''\n  returning id\n)\nselect\n  (select id from score_insert) as scoring_history_id,\n  (select mastery_score from mastery_update limit 1) as updated_mastery_score;",
+        "options": {
+          "queryReplacement": "={{[\n  $json.student_id,\n  $json.session_id,\n  $json.score.concept_code,\n  $json.student_message_id,\n  $json.score.conceptual_accuracy,\n  $json.score.reasoning_quality,\n  $json.score.use_of_evidence,\n  $json.score.confidence_calibration,\n  $json.score.independence,\n  $json.score.improvement,\n  $json.score.hints_used,\n  $json.score.misconceptions_detected,\n  $json.score.final_score,\n  JSON.stringify($json.score),\n  $json.score.confidence_estimate,\n  $json.score.misconception_type,\n  $json.score.short_feedback\n]}}"
+        }
+      },
+      "id": "8dbfb8a7-2389-4e82-8f4f-save-score",
+      "name": "Save Score And Mastery",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3400,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Telegram Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Telegram Input": {
+      "main": [
+        [
+          {
+            "node": "Has Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Text Message": {
+      "main": [
+        [
+          {
+            "node": "Get Or Create Student",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get Or Create Student": {
+      "main": [
+        [
+          {
+            "node": "Get Active Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Session": {
+      "main": [
+        [
+          {
+            "node": "Save Student Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Student Message": {
+      "main": [
+        [
+          {
+            "node": "Load Tutor Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Tutor Context": {
+      "main": [
+        [
+          {
+            "node": "Compute Pedagogy Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Pedagogy Policy": {
+      "main": [
+        [
+          {
+            "node": "Socratic Tutor LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Socratic Tutor LLM": {
+      "main": [
+        [
+          {
+            "node": "Parse Tutor Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Tutor Output": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Reply": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Assistant Message": {
+      "main": [
+        [
+          {
+            "node": "Scoring Evaluator LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scoring Evaluator LLM": {
+      "main": [
+        [
+          {
+            "node": "Parse Score Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Score Output": {
+      "main": [
+        [
+          {
+            "node": "Save Score And Mastery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": [
+    {
+      "name": "telegram"
+    },
+    {
+      "name": "socratic-tutor"
+    },
+    {
+      "name": "geography-disasters"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-05-16T00:00:00.000Z",
+  "versionId": "starter"
+}
+
