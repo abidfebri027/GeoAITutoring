@@ -59,6 +59,21 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 | Complex document ingestion | Optional RAGFlow |
 | LLM provider | OpenAI, Gemini, Anthropic, or compatible API |
 
+## Tech Stack
+
+| Category | Technology | Purpose |
+| --- | --- | --- |
+| Chat interface | Telegram Bot API | Student-facing tutor chat |
+| Automation | n8n | Workflow orchestration, routing, scoring, and integrations |
+| Database | Supabase Postgres | Student profiles, sessions, chat memory, mastery, and scoring history |
+| Vector search | Supabase Vector / pgvector | Retrieval for curriculum-based geography content |
+| RAG ingestion | RAGFlow, optional | Parsing complex PDFs, diagrams, scanned documents, and case-study materials |
+| AI models | OpenAI / Gemini / Anthropic | Socratic tutor replies, scoring, retrieval query rewriting |
+| Prompts | Markdown prompt templates | Tutor behavior, scoring rubric, and retrieval query generation |
+| Workflow assets | n8n JSON workflow + Code nodes | Importable Telegram tutoring automation |
+| Deployment | n8n Cloud or self-hosted, Supabase Cloud | MVP hosting and managed persistence |
+| Analytics | Supabase SQL, Metabase, or dashboard app | Teacher/admin mastery and progress tracking |
+
 ## Project Structure
 
 ```text
