@@ -1,5 +1,7 @@
 # GeoAITutoring
 
+![GeoAI Agentic AI Tutoring logo](assets/geoai-logo.png)
+
 **GeoAITutoring** is a starter kit for a Telegram-based Socratic AI tutor that helps students learn geography and natural-disaster concepts through guided questioning instead of direct answer dumping.
 
 The first learning domain is **natural disasters**: earthquakes, volcanoes, floods, tsunamis, landslides, climate hazards, mitigation, risk, vulnerability, exposure, and disaster case studies.
