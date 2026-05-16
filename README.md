@@ -10,6 +10,15 @@ GeoAITutoring is an AI-powered adaptive learning system for geography education.
 
 Instead of acting like a normal chatbot, the system guides students with Socratic questions, hints, misconception repair, short explanations, and adaptive assessments. The goal is to help students understand why disasters happen, how risk can be reduced, and how geographic concepts connect to real-world disaster events.
 
+## Creators
+
+- Syamsunardi
+- Abdul Mannan
+- Alfyananda Kurnia Putra
+- Soraya Norma Mustika
+- Abid Febriansyah
+- Diky Al-Khalidy
+
 ## Why This Exists
 
 Most AI chatbots answer a student's question immediately. This project is designed to behave more like a careful tutor:
