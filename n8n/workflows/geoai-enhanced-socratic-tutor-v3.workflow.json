@@ -1,0 +1,532 @@
+{
+  "name": "GeoAI - Enhanced Socratic Tutor v3",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        48,
+        704
+      ],
+      "id": "c0454492-24d9-4165-88d4-b5afcbc81414",
+      "name": "Telegram Trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS student_profiles (\n  student_id TEXT PRIMARY KEY,\n  student_name TEXT,\n  attempt_count INTEGER DEFAULT 0,\n  mastery_score INTEGER DEFAULT 0,\n  current_topic TEXT DEFAULT 'Earth Science Basics',\n  misconceptions JSONB DEFAULT '[]',\n  completed_topics JSONB DEFAULT '[]',\n  updated_at TIMESTAMPTZ DEFAULT NOW()\n);\n\nINSERT INTO student_profiles (student_id, student_name)\nVALUES ('{{ String($json.message.from.id || '').replace(/'/g, \"''\") }}', '{{ String($json.message.from.first_name || \"Student\").replace(/'/g, \"''\") }}')\nON CONFLICT (student_id) DO UPDATE\n  SET student_name = EXCLUDED.student_name\nRETURNING\n  student_id,\n  student_name,\n  attempt_count,\n  mastery_score,\n  current_topic,\n  misconceptions::text AS misconceptions,\n  completed_topics::text AS completed_topics;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        272,
+        704
+      ],
+      "id": "10ee07e7-6c65-4992-9ef3-5e391abb6320",
+      "name": "Load Student State",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── PREPARE CONTEXT v3 ────────────────────────────────────────────────────────\n// NEW: command detection, language detection, spaced repetition\n\nconst triggerData = $('Telegram Trigger').item.json;\nconst dbRow = $input.item.json;\n\nconst messageText = triggerData.message?.text || '';\nconst studentId   = String(triggerData.message?.from?.id   || '');\nconst studentName = triggerData.message?.from?.first_name  || 'Student';\nconst chatId      = triggerData.message?.chat?.id;\n\nconst attemptCount    = parseInt(dbRow.attempt_count)  || 0;\nconst masteryScore    = parseInt(dbRow.mastery_score)  || 0;\nconst currentTopic    = dbRow.current_topic            || 'Earth Science Basics';\nconst misconceptions  = dbRow.misconceptions           || '[]';\nconst completedTopics = dbRow.completed_topics         || '[]';\n\n// ── Command detection ─────────────────────────────────────────────────────────\nlet isCommand      = false;\nlet commandType    = null;\nlet commandResponse = null;\n\nif (messageText.startsWith('/')) {\n  const cmd = messageText.split(' ')[0].toLowerCase();\n\n  if (cmd === '/start' || cmd === '/help') {\n    isCommand = true;\n    commandType = 'start';\n    commandResponse = `🌍 Halo, ${studentName}! Welcome to *GeoAI*!\\n\\nI'm your Socratic tutor for Earth Science, Geography & Disaster Mitigation. I won't just give you answers — I'll guide you to discover them! 🔍\\n\\n📍 Current topic: *${currentTopic}*\\n⭐ Mastery: ${masteryScore}/5\\n\\nAsk me anything, or use:\\n📊 /progress — your stats\\n📚 /topic — current topic\\n💡 /hint — force a hint now\\n🔄 /reset — reset attempt counter`;\n\n  } else if (cmd === '/progress') {\n    isCommand = true;\n    commandType = 'progress';\n    const stars = '⭐'.repeat(masteryScore) + '☆'.repeat(5 - masteryScore);\n    let miscList = '\\u2022 None detected yet \\uD83D\udc4f';\n    try {\n      const arr = typeof misconceptions === 'string' ? JSON.parse(misconceptions) : (misconceptions || []);\n      if (arr.length > 0) miscList = arr.map(m => `\\u2022 ${m.type.replace(/_/g, ' ')}`).join('\\n');\n    } catch(e) {}\n    let completedList = '\\u2022 None yet — keep going!';\n    try {\n      const arr = typeof completedTopics === 'string' ? JSON.parse(completedTopics) : (completedTopics || []);\n      if (arr.length > 0) completedList = arr.map(t => `\\u2705 ${t}`).join('\\n');\n    } catch(e) {}\n    commandResponse = `📊 *Progress Report — ${studentName}*\\n\\n📍 Topic: ${currentTopic}\\n${stars} Mastery ${masteryScore}/5\\n🔄 Attempt: ${attemptCount}/20\\n\\n✅ *Completed Topics:*\\n${completedList}\\n\\n🧠 *Tracked Misconceptions:*\\n${miscList}\\n\\n*Terus semangat!* 💪`;\n\n  } else if (cmd === '/topic') {\n    isCommand = true;\n    commandType = 'topic';\n    commandResponse = `📚 Current topic: *${currentTopic}*\\n\\n⭐ Mastery: ${masteryScore}/5\\n\\nAsk me anything about this topic! 🌋`;\n\n  } else if (cmd === '/reset') {\n    isCommand = true;\n    commandType = 'reset';\n    commandResponse = `🔄 Reset done, ${studentName}! Your attempt counter is back to zero.\\n\\nFresh start on *${currentTopic}* — what would you like to explore? 🌍`;\n\n  } else if (cmd === '/hint') {\n    // Not a short-circuit — pass through agent with forced hint mode\n    commandType = 'hint';\n  }\n}\n\n// ── Intent classification ─────────────────────────────────────────────────────\nconst lower = messageText.toLowerCase().trim();\nlet intent = 'answer_attempt';\n\nif (commandType === 'hint') {\n  intent = 'hint_request';\n} else if (!isCommand) {\n  if (/^(hi|hello|hey|selamat|good morning|good afternoon|halo|hy)\\b/i.test(lower)) {\n    intent = 'greeting';\n  } else if (\n    lower.endsWith('?') ||\n    /^(what|how|why|when|where|who|is |are |can |does |could |would )/.test(lower)\n  ) {\n    intent = 'new_question';\n  } else if (\n    /(clarify|what do you mean|i don.t understand|explain that|elaborate|confused|maksud)/i.test(lower)\n  ) {\n    intent = 'clarification';\n  } else if (\n    /(give up|just tell me|i give up|answer please|tell me the answer|just give|langsung kasih|jawab saja|kasih tau)/i.test(lower)\n  ) {\n    intent = 'bypass_attempt';\n  }\n}\n\n// ── Language detection ────────────────────────────────────────────────────────\nconst indonesianMarkers = /\\b(apa|bagaimana|mengapa|kenapa|dimana|kapan|siapa|adalah|yang|dan|atau|dengan|untuk|pada|dari|ini|itu|tidak|bisa|akan|sudah|saya|kamu|kami|mereka|jelaskan|sebutkan|tolong|mohon|gimana|emang|sih|dong|ya|nih|loh)\\b/i;\nconst preferredLang = indonesianMarkers.test(messageText) ? 'id' : 'en';\n\n// ── Response mode ─────────────────────────────────────────────────────────────\nlet responseMode;\nif (commandType === 'hint') {\n  responseMode = 'hint';\n} else if (attemptCount <  5)  responseMode = 'socratic_question';\nelse if (attemptCount < 10)    responseMode = 'hint';\nelse if (attemptCount < 15)    responseMode = 'explain_concept';\nelse if (attemptCount < 20)    responseMode = 'partial_answer';\nelse                           responseMode = 'full_answer';\n\n// ── Misconception detection ───────────────────────────────────────────────────\nconst misconceptionPatterns = [\n  { pattern: /epicenter.*caus|caus.*epicenter/i,                          type: 'epicenter_confusion',           correction: 'The epicenter is the surface point above the focus. The energy originates at the focus (hypocenter) underground, not the epicenter.' },\n  { pattern: /all earthquake.*tsunami|earthquake always.*tsunami/i,       type: 'earthquake_tsunami_assumption', correction: 'Only submarine earthquakes that produce large vertical seafloor displacement generate tsunamis.' },\n  { pattern: /volcano.*random|random.*volcano/i,                          type: 'volcano_distribution',         correction: 'Volcanoes are not randomly distributed. They follow tectonic plate boundaries and hotspots.' },\n  { pattern: /richter scale (is |are )?use/i,                             type: 'richter_outdated',             correction: 'The Richter scale is largely obsolete for large earthquakes. Scientists now use the Moment Magnitude Scale (Mw).' },\n  { pattern: /desert.*always hot|all desert.*hot/i,                       type: 'desert_temperature',           correction: 'Deserts are defined by low precipitation (<250 mm/yr), not temperature. Antarctica and the Gobi are cold deserts.' },\n  { pattern: /magma.*same.*lava|lava.*same.*magma|magma and lava (is|are) same/i, type: 'magma_lava_confusion', correction: 'Magma is molten rock underground. Lava is the same material after it erupts onto the surface.' },\n  { pattern: /tsunami.*wind|wind.*cause.*tsunami/i,                       type: 'tsunami_wind_cause',           correction: 'Tsunamis are caused by sudden displacement of large volumes of water — not wind.' },\n];\n\nlet detectedMisconception = null;\nfor (const mp of misconceptionPatterns) {\n  if (mp.pattern.test(messageText)) {\n    detectedMisconception = JSON.stringify(mp);\n    break;\n  }\n}\n\n// ── Spaced repetition (resurface old misconceptions ~30% of fresh sessions) ───\nlet spaceRepetitionCue = null;\nif (attemptCount === 0 && intent !== 'greeting' && !isCommand) {\n  try {\n    const arr = typeof misconceptions === 'string' ? JSON.parse(misconceptions) : (misconceptions || []);\n    if (arr.length > 0 && Math.random() < 0.3) {\n      spaceRepetitionCue = arr[Math.floor(Math.random() * arr.length)].type.replace(/_/g, ' ');\n    }\n  } catch(e) {}\n}\n\n// ── Difficulty ────────────────────────────────────────────────────────────────\nconst difficultyLevel = Math.min(masteryScore + 1, 5);\n\nreturn [{\n  json: {\n    studentId, studentName, chatId, messageText,\n    intent, bypassAttempt: intent === 'bypass_attempt',\n    attemptCount, masteryScore, currentTopic,\n    misconceptions, completedTopics,\n    responseMode, difficultyLevel,\n    isFullAnswerMode: responseMode === 'full_answer',\n    detectedMisconception,\n    isCommand, commandType, commandResponse,\n    preferredLang, spaceRepetitionCue,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        704
+      ],
+      "id": "ce2a6105-c06a-4b28-8782-8bbc67de8b55",
+      "name": "Prepare Context"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-iscommand-001",
+              "leftValue": "={{ $json.isCommand }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        704
+      ],
+      "id": "b1000001-0000-0000-0000-000000000001",
+      "name": "Is Command?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE student_profiles\nSET\n  attempt_count = CASE WHEN '{{ String($json.commandType || '').replace(/'/g, \"''\") }}' = 'reset' THEN 0 ELSE attempt_count END,\n  updated_at    = NOW()\nWHERE student_id = '{{ String($json.studentId || '').replace(/'/g, \"''\") }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        944,
+        540
+      ],
+      "id": "b1000002-0000-0000-0000-000000000002",
+      "name": "Command DB Update",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Prepare Context').item.json.chatId }}",
+        "text": "={{ $('Prepare Context').item.json.commandResponse }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1168,
+        540
+      ],
+      "id": "b1000003-0000-0000-0000-000000000003",
+      "name": "Send Command Response",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-3-small"
+            },
+            {
+              "name": "input",
+              "value": "={{ $('Prepare Context').item.json.messageText + ' topic: ' + $('Prepare Context').item.json.currentTopic }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        944,
+        704
+      ],
+      "id": "b1000004-0000-0000-0000-000000000004",
+      "name": "Get Query Embedding",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OPENAI_HEADER_CREDENTIAL_ID",
+          "name": "OpenAI API Key (Header Auth)"
+        }
+      },
+      "notes": "Create an HTTP Header Auth credential: Name = Authorization, Value = Bearer YOUR_OPENAI_API_KEY"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── FORMAT EMBEDDING ─────────────────────────────────────────────────────────\n// Converts the OpenAI embedding array to a pgvector-compatible string.\n\nconst embedding = $json.data?.[0]?.embedding;\n\nif (!embedding || !Array.isArray(embedding)) {\n  // Fallback: return empty context so downstream nodes don't crash\n  const ctx = $('Prepare Context').item.json;\n  return [{ json: { ...ctx, embeddingStr: null, lessonContext: 'No embedding available. Use general knowledge.' } }];\n}\n\nconst embeddingStr = '[' + embedding.join(',') + ']';\nconst ctx = $('Prepare Context').item.json;\n\nreturn [{\n  json: {\n    embeddingStr,\n    currentTopic: ctx.currentTopic,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        704
+      ],
+      "id": "b1000005-0000-0000-0000-000000000005",
+      "name": "Format Embedding"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT topic, subtopic, content, source,\n  ROUND((1 - (embedding <=> '{{ String($json.embeddingStr || \"[]\").replace(/'/g, \"''\") }}'::vector))::numeric, 4) AS similarity\nFROM lesson_chunks\nWHERE embedding IS NOT NULL\n  AND (\n    topic ILIKE '%{{ String($json.currentTopic || '').replace(/'/g, \"''\") }}%'\n    OR 1 - (embedding <=> '{{ String($json.embeddingStr || \"[]\").replace(/'/g, \"''\") }}'::vector) > 0.50\n  )\nORDER BY embedding <=> '{{ String($json.embeddingStr || \"[]\").replace(/'/g, \"''\") }}'::vector\nLIMIT 3;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1392,
+        704
+      ],
+      "id": "b1000006-0000-0000-0000-000000000006",
+      "name": "Search Lesson Chunks",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── FORMAT RAG CONTEXT ───────────────────────────────────────────────────────\n// Merges retrieved lesson chunks with Prepare Context data.\n\nconst ctx = $('Prepare Context').item.json;\nconst items = $input.all();\n\nlet lessonContext = 'No specific lesson material found for this query. Draw on your general Earth Science knowledge.';\n\nif (items && items.length > 0 && items[0].json && items[0].json.content) {\n  const chunks = items\n    .filter(item => item.json && item.json.content)\n    .map(item => {\n      const sim     = item.json.similarity != null ? (parseFloat(item.json.similarity) * 100).toFixed(0) : '?';\n      const source  = item.json.source   || 'Curriculum';\n      const subtopic = item.json.subtopic || item.json.topic || 'General';\n      return `[Source: ${source} | Subtopic: ${subtopic} | Relevance: ${sim}%]\\n${item.json.content}`;\n    });\n  lessonContext = chunks.join('\\n\\n---\\n\\n');\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    lessonContext,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        704
+      ],
+      "id": "b1000007-0000-0000-0000-000000000007",
+      "name": "Format RAG Context"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.messageText }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are GeoAI — a warm, encouraging Socratic AI Tutor specialising in Earth Science, Geography, and Disaster Mitigation. You are chatting via Telegram with a student named {{ $json.studentName }}.\n\nToday you must guide {{ $json.studentName }} toward understanding, never simply handing over answers.\n\n━━━ STUDENT PROFILE ━━━\n• Name: {{ $json.studentName }}\n• Topic: {{ $json.currentTopic }}\n• Mastery level: {{ $json.masteryScore }}/5\n• Attempt number: {{ $json.attemptCount }}/20\n• Response mode: {{ $json.responseMode }}\n• Student intent: {{ $json.intent }}\n• Difficulty level: {{ $json.difficultyLevel }}/5\n• Detected misconception: {{ $json.detectedMisconception !== null ? $json.detectedMisconception : 'None detected' }}\n\n━━━ CURRICULUM CONTEXT (RAG) ━━━\n{{ $json.lessonContext }}\n\nUse this curriculum material as your factual grounding. Never quote it verbatim — weave key ideas naturally into your Socratic questions and hints. If the context is empty or irrelevant, draw on your general Earth Science knowledge.\n\n━━━ LANGUAGE ━━━\n{{ $json.preferredLang === 'id' ? 'The student is writing in Bahasa Indonesia. Respond FULLY in Bahasa Indonesia. Keep it warm, semi-formal, and emoji-rich.' : 'Respond in English. Sprinkle warm Bahasa Indonesia phrases (e.g. Bagus sekali! / Coba pikirkan… / Hampir benar!) throughout.' }}\n\n━━━ SPACED REPETITION ━━━\n{{ $json.spaceRepetitionCue ? 'At a natural moment this session, gently revisit this past misconception: [' + $json.spaceRepetitionCue + ']. Example approach: Oh by the way — sebelumnya kita pernah membahas ' + $json.spaceRepetitionCue + '. Do you remember what we discovered? Let us lock that in! 🔒' : '' }}\n\n━━━ RESPONSE MODE — FOLLOW THESE RULES STRICTLY ━━━\n\nCurrent mode: {{ $json.responseMode }}\n\n• socratic_question (attempts 0–4):\n  → Ask ONE guiding question only.\n  → NEVER confirm whether the student is right or wrong.\n  → NEVER reveal the answer or even a partial answer.\n  → Lead the student to discover the concept themselves.\n  → Example: 'What do you think causes tectonic plates to move? 🤔'\n\n• hint (attempts 5–9):\n  → Offer ONE directional hint that points TOWARD the answer without revealing it.\n  → Example: 'Think about what happens deep underground before an earthquake… 🌍'\n\n• explain_concept (attempts 10–14):\n  → Explain the underlying concept clearly in plain language.\n  → Then immediately ask the student to apply it to the original question.\n  → Example: 'Convection currents in the mantle drive plate movement. Now — how does that explain where volcanoes cluster? 🌋'\n\n• partial_answer (attempts 15–19):\n  → Provide a partial answer with a key term or phrase left blank or incomplete.\n  → Ask the student to complete it.\n  → Example: 'The epicenter is the point on the Earth's surface directly above the… can you complete that? 📍'\n\n• full_answer (attempt = 20 exactly):\n  → Give the complete, detailed, accurate answer with clear explanation.\n  → Celebrate the student's persistence warmly. 🏆\n  → Then ask if they would like to try a new question to reinforce the concept.\n\n━━━ DIFFICULTY CALIBRATION ━━━\n\nGenerate your question at difficulty level {{ $json.difficultyLevel }}/5:\n• Level 1 — Observation: 'What do you notice about…?'\n• Level 2 — Recall: 'Can you name…?'\n• Level 3 — Comprehension: 'Why does…?'\n• Level 4 — Analysis: 'How would X change if…?'\n• Level 5 — Evaluation: 'Compare X and Y — what are the implications of…?'\n\n━━━ MISCONCEPTION HANDLING ━━━\n\n{{ $json.detectedMisconception !== null ? 'A misconception was detected: ' + $json.detectedMisconception + ' Do NOT tell the student they are wrong directly. Ask a targeted question that surfaces the contradiction: \"If [their claim] were true, what would we expect to see...?\" Guide them to discover the error themselves.' : 'No misconception detected. Proceed with normal Socratic guidance.' }}\n\n━━━ BYPASS PREVENTION ━━━\n\n{{ $json.bypassAttempt ? 'The student is asking for the direct answer. Respond warmly but hold the line: I know it is tempting to skip ahead! But you are genuinely close to understanding this. Let me ask you one more question... Then ask a guiding question. NEVER give the full answer on a bypass attempt unless attempt_count is exactly 20.' : '' }}\n\n━━━ FORMATTING RULES ━━━\n\n• Always address the student by name: {{ $json.studentName }}\n• Begin with a short warm encouragement (e.g. Great thinking! / You are getting closer! / I love your curiosity!)\n• Add 1–2 relevant emojis per sentence (🌋🌍🌊🏔️💡🤔✅❓📍🌩️)\n• Show attempt badge at the very end of every response: *(Attempt {{ $json.attemptCount }} of 20)*\n• Keep total response under 160 words for Telegram readability\n• End EVERY response with a question (except full_answer mode)",
+          "returnIntermediateSteps": false,
+          "enableStreaming": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1840,
+        704
+      ],
+      "id": "2a7e8161-9206-42c9-9599-fad4cb2ca8f3",
+      "name": "Orchestrator Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1744,
+        928
+      ],
+      "id": "6780fca4-396b-4fe4-9f77-d4f94f1f3769",
+      "name": "GPT-4o Mini",
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.from.id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        1888,
+        928
+      ],
+      "id": "f550de92-e6e0-4d57-bec6-bc592f317164",
+      "name": "Postgres Chat Memory1",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── GUARDRAIL GATE v3 ─────────────────────────────────────────────────────────\n// NEW: topic progression, completed_topics tracking, /reset handling\n\nconst agentOutput = $('Orchestrator Agent').item.json.output || '';\nconst ctx = $('Prepare Context').item.json;\n\nconst {\n  attemptCount, responseMode, bypassAttempt,\n  studentName, masteryScore, studentId,\n  currentTopic, misconceptions, chatId,\n  detectedMisconception, completedTopics, commandType,\n} = ctx;\n\n// ── Anti-spoiler patterns ─────────────────────────────────────────────────────\nconst spoilerPatterns = [\n  /the (?:correct |right )?answer is\\s+[^.!?\\n]{5,}/i,\n  /it(?:'s| is)(?: called)? (?:the )?[A-Z][a-z]{3,}[\\s,]/,\n  /(?:correct|right|exactly)!\\s+[A-Z][a-z]+ (?:is|are) /i,\n  /the definition (?:is|of [\\w ]+ is)\\s+[^.!?\\n]{10,}/i,\n];\n\nlet isSafe = true;\nif (responseMode !== 'full_answer') {\n  for (const p of spoilerPatterns) {\n    if (p.test(agentOutput)) { isSafe = false; break; }\n  }\n}\n\nlet finalResponse = isSafe\n  ? agentOutput\n  : `\\uD83D\\uDCAA Semangat, ${studentName}! Let me keep guiding you rather than jumping to the answer.\\n\\n\\uD83D\\uDD0D Here is a clue: look back at what you already know about this topic. What single fact might unlock the next step for you?\\n\\n*(Attempt ${attemptCount} of 20)*`;\n\n// ── Handle /reset command ─────────────────────────────────────────────────────\nconst isReset = commandType === 'reset';\nif (isReset) {\n  finalResponse = `\\uD83D\\uDD04 Done, ${studentName}! Attempt counter is back to zero.\\n\\nFresh start on *${currentTopic}* — ask me anything! \\uD83C\\uDF0D`;\n}\n\n// ── Mastery leveling ──────────────────────────────────────────────────────────\nconst successSignals = /\\b(correct|well done|excellent|spot on|exactly right|bravo|great answer|nicely done|perfect|bagus|tepat|benar)\\b/i;\nconst shouldLevelUp  = successSignals.test(agentOutput) && responseMode !== 'full_answer' && !isReset;\n\n// ── Attempt counter ───────────────────────────────────────────────────────────\nconst newAttemptCount = isReset ? 0 : (responseMode === 'full_answer' ? 0 : attemptCount + 1);\nconst newMasteryScore = shouldLevelUp ? Math.min(masteryScore + 1, 5) : masteryScore;\n\n// ── Topic progression ─────────────────────────────────────────────────────────\nconst TOPICS_SEQUENCE = [\n  'Earth Science Basics', 'Plate Tectonics', 'Earthquakes',\n  'Volcanoes', 'Tsunamis', 'Weather & Climate', 'Hydrology', 'Disaster Mitigation',\n];\n\nlet newCurrentTopic = currentTopic;\nlet topicAdvanced   = false;\n\nif (newMasteryScore >= 5 && masteryScore < 5) {\n  const idx = TOPICS_SEQUENCE.indexOf(currentTopic);\n  if (idx >= 0 && idx < TOPICS_SEQUENCE.length - 1) {\n    newCurrentTopic = TOPICS_SEQUENCE[idx + 1];\n    topicAdvanced   = true;\n    finalResponse   = `\\uD83C\\uDFC6 Luar biasa, ${studentName}! You've fully mastered *${currentTopic}*! \\uD83C\\uDF93\\n\\nMoving you to the next topic: *${newCurrentTopic}* \\uD83D\\uDE80\\n\\nMastery resets for the new topic — all your progress is saved! Ask me anything about *${newCurrentTopic}* when you're ready. \\uD83C\\uDF0D`;\n  }\n}\n\n// ── Completed topics ──────────────────────────────────────────────────────────\nlet updatedCompletedTopics = completedTopics;\nif (topicAdvanced) {\n  try {\n    const arr = typeof completedTopics === 'string' ? JSON.parse(completedTopics) : (completedTopics || []);\n    if (!arr.includes(currentTopic)) arr.push(currentTopic);\n    updatedCompletedTopics = JSON.stringify(arr);\n  } catch(e) { updatedCompletedTopics = completedTopics; }\n}\n\nconst finalMasteryScore = topicAdvanced ? 0 : newMasteryScore;\n\n// ── Misconception logging ─────────────────────────────────────────────────────\nlet updatedMisconceptions = misconceptions;\nif (detectedMisconception) {\n  try {\n    const arr    = typeof misconceptions === 'string' ? JSON.parse(misconceptions) : (misconceptions || []);\n    const parsed = JSON.parse(detectedMisconception);\n    if (!arr.find(m => m.type === parsed.type)) {\n      arr.push({ type: parsed.type, firstSeenAt: new Date().toISOString() });\n    }\n    updatedMisconceptions = JSON.stringify(arr);\n  } catch(e) { updatedMisconceptions = misconceptions; }\n}\n\nreturn [{\n  json: {\n    studentId, studentName, chatId,\n    currentTopic: newCurrentTopic,\n    finalResponse, isSafe,\n    newAttemptCount,\n    newMasteryScore: finalMasteryScore,\n    updatedMisconceptions,\n    updatedCompletedTopics,\n    shouldLevelUp, topicAdvanced,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        704
+      ],
+      "id": "e4e6acb2-bddf-4127-9518-188f9e59d023",
+      "name": "Guardrail Gate"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO student_profiles\n  (student_id, student_name, attempt_count, mastery_score, current_topic, misconceptions, completed_topics, updated_at)\nVALUES (\n  '{{ String($json.studentId || '').replace(/'/g, \"''\") }}',\n  '{{ String($json.studentName || \"Student\").replace(/'/g, \"''\") }}',\n  {{ Number($json.newAttemptCount || 0) }},\n  {{ Number($json.newMasteryScore || 0) }},\n  '{{ String($json.currentTopic || \"Earth Science Basics\").replace(/'/g, \"''\") }}',\n  '{{ String($json.updatedMisconceptions || \"[]\").replace(/'/g, \"''\") }}'::jsonb,\n  '{{ String($json.updatedCompletedTopics || \"[]\").replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (student_id) DO UPDATE SET\n  student_name      = EXCLUDED.student_name,\n  attempt_count     = EXCLUDED.attempt_count,\n  mastery_score     = EXCLUDED.mastery_score,\n  current_topic     = EXCLUDED.current_topic,\n  misconceptions    = EXCLUDED.misconceptions,\n  completed_topics  = EXCLUDED.completed_topics,\n  updated_at        = NOW()\nRETURNING student_id, attempt_count, mastery_score, current_topic;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2288,
+        704
+      ],
+      "id": "cfb727b3-aba2-412e-896d-6558cf764f18",
+      "name": "Update Student State",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Guardrail Gate').item.json.chatId }}",
+        "text": "={{ $('Guardrail Gate').item.json.finalResponse }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2512,
+        704
+      ],
+      "id": "ff8c439f-83e6-4562-a051-525e4b0c5b00",
+      "name": "Send a text message",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Student State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Student State": {
+      "main": [
+        [
+          {
+            "node": "Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Is Command?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Command?": {
+      "main": [
+        [
+          {
+            "node": "Command DB Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command DB Update": {
+      "main": [
+        [
+          {
+            "node": "Send Command Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Format Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Embedding": {
+      "main": [
+        [
+          {
+            "node": "Search Lesson Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Lesson Chunks": {
+      "main": [
+        [
+          {
+            "node": "Format RAG Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format RAG Context": {
+      "main": [
+        [
+          {
+            "node": "Orchestrator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o Mini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Orchestrator Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Orchestrator Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orchestrator Agent": {
+      "main": [
+        [
+          {
+            "node": "Guardrail Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail Gate": {
+      "main": [
+        [
+          {
+            "node": "Update Student State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Student State": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "geoai-enhanced-socratic-tutor-v3-template",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "telegram"
+    },
+    {
+      "name": "socratic-tutor"
+    },
+    {
+      "name": "geography-disasters"
+    },
+    {
+      "name": "rag"
+    }
+  ]
+}

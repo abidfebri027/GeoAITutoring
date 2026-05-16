@@ -50,7 +50,7 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 ## Features
 
 - Telegram-first student interface
-- n8n workflow blueprints for an enhanced adaptive tutor, a simple agent canvas, and a fuller analytics workflow
+- n8n workflow blueprints for a RAG-enabled adaptive tutor, a simple agent canvas, and a fuller analytics workflow
 - Supabase schema for profiles, chat memory, mastery, misconceptions, assessments, and RAG chunks
 - Socratic tutor prompt template
 - scoring evaluator prompt and mastery update formula
@@ -78,6 +78,7 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 | Automation | n8n | Workflow orchestration, routing, scoring, and integrations |
 | Database | Supabase Postgres | Student profiles, sessions, chat memory, mastery, and scoring history |
 | Vector search | Supabase Vector / pgvector | Retrieval for curriculum-based geography content |
+| RAG setup | Supabase Vector / pgvector lesson chunks | Lesson-grounded Socratic tutoring with `lesson_chunks` |
 | RAG ingestion | RAGFlow, optional | Parsing complex PDFs, diagrams, scanned documents, and case-study materials |
 | AI models | OpenAI | Socratic tutor replies, scoring, retrieval query rewriting |
 | Prompts | Markdown prompt templates | Tutor behavior, scoring rubric, and retrieval query generation |
@@ -108,13 +109,14 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 
 1. Create a Telegram bot with `@BotFather`.
 2. Create a Supabase project.
-3. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor.
-4. Run [`supabase/seed_concepts.sql`](supabase/seed_concepts.sql).
-5. Import [`n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json) into n8n.
+3. Run [`supabase/rag_setup.sql`](supabase/rag_setup.sql) in the Supabase SQL editor.
+4. Skip [`supabase/schema.sql`](supabase/schema.sql) for the v3 workflow unless you are intentionally using the older full analytics workflow in a separate database/schema.
+5. Import [`n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json) into n8n.
 6. Configure n8n credentials:
    - Telegram Bot API
    - Supabase Postgres
-   - LLM provider API key
+   - OpenAI chat model credential
+   - OpenAI HTTP Header Auth credential for embeddings
 7. Test the bot in Telegram:
 
 ```text
@@ -125,15 +127,20 @@ Detailed setup steps are in [`docs/setup.md`](docs/setup.md).
 
 ### Recommended Workflow
 
-Use [`n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json) for the best MVP experience.
+Use [`n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json) for the best MVP experience.
 
 It includes:
 
 - automatic `student_profiles` table creation on first contact
+- command handling for `/start`, `/help`, `/progress`, `/topic`, `/reset`, and `/hint`
 - persisted attempt count, mastery score, current topic, and misconceptions
 - intent classification for greetings, questions, answer attempts, clarification, and bypass attempts
+- Indonesian/English language detection
 - adaptive response modes from Socratic question to hint, concept explanation, partial answer, and full answer
+- RAG retrieval from `lesson_chunks` using OpenAI embeddings and pgvector similarity search
 - misconception detection for common Earth Science and disaster-geography errors
+- spaced repetition cues based on previous misconceptions
+- topic progression and completed-topic tracking
 - guardrails that block premature answer reveals
 - state updates after every Telegram exchange
 
@@ -149,7 +156,7 @@ Telegram Trigger -> GeoAI Socratic Agent -> Send Telegram Message
                       `-> Postgres Chat Memory
 ```
 
-Use the fuller `telegram-socratic-tutor.workflow.json` when you want explicit Supabase mastery tables, scoring history, and structured learning analytics.
+Use `geoai-enhanced-socratic-tutor-v2.workflow.json` when you want the adaptive tutor without RAG. Use the fuller `telegram-socratic-tutor.workflow.json` when you want explicit Supabase mastery tables, scoring history, and structured learning analytics.
 
 ## Important Tutor Rule
 
@@ -167,14 +174,14 @@ High mastery -> move to assessment
 
 ## RAG Notes
 
-The starter workflow can run without retrieval first. When you are ready to add curriculum grounding:
+The recommended v3 workflow uses retrieval. To prepare the RAG tables:
 
-1. Prepare learning chunks using [`rag/knowledge-base-guide.md`](rag/knowledge-base-guide.md).
-2. Insert starter examples from [`rag/sample-curriculum-chunks.sql`](rag/sample-curriculum-chunks.sql).
-3. Generate embeddings for `knowledge_chunks.embedding`.
-4. Add the retrieval nodes from [`n8n/rag-query-addon.md`](n8n/rag-query-addon.md).
+1. Run [`supabase/rag_setup.sql`](supabase/rag_setup.sql).
+2. Prepare learning chunks using [`rag/knowledge-base-guide.md`](rag/knowledge-base-guide.md).
+3. Generate embeddings for `lesson_chunks.embedding`.
+4. Import and configure [`n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json).
 
-Starter chunks are included without embeddings, so they will not appear in vector search until embeddings are generated.
+Starter chunks are included without embeddings, so they will not appear in vector search until embeddings are generated. The older `supabase/schema.sql` and `rag/sample-curriculum-chunks.sql` files remain available for the fuller analytics workflow that uses `knowledge_chunks`, but they should not be mixed into the same database table namespace as the v3 lightweight `student_profiles` setup without adjustment.
 
 ## Roadmap
 

@@ -8,25 +8,23 @@ GeoAITutoring is built as a stateful tutoring loop. Telegram handles the student
 Telegram student
 -> Telegram Bot
 -> n8n Telegram Trigger
--> Normalize Telegram input
--> Get or create Supabase student profile
--> Get or create active tutoring session
--> Save student message
--> Load recent chat, profile, and mastery
--> Retrieve curriculum context when RAG is enabled
--> Compute pedagogy policy
+-> Load or create student_profiles row
+-> Prepare adaptive context
+-> Handle Telegram commands when present
+-> Embed the student query
+-> Retrieve curriculum context from lesson_chunks
+-> Format RAG context
 -> Generate Socratic tutor reply
+-> Run guardrail gate
+-> Update student state, mastery, misconceptions, and completed topics
 -> Send Telegram reply
--> Save assistant message
--> Score latest student response
--> Update mastery, misconceptions, and scoring history
 ```
 
 ## Core Design Choice
 
 n8n owns the teaching policy. The LLM owns wording.
 
-This keeps the tutor from answering too early. n8n calculates an `allowed_action`, then the tutor prompt generates a Telegram-ready response that follows that action.
+This keeps the tutor from answering too early. n8n prepares the attempt count, response mode, misconception context, lesson context, language preference, and spaced repetition cue. The tutor prompt then generates a Telegram-ready response that follows those constraints.
 
 | Learning State | Allowed Action |
 | --- | --- |
@@ -36,6 +34,14 @@ This keeps the tutor from answering too early. n8n calculates an `allowed_action
 | Misconception detected | Correct misconception gently |
 | High mastery | Move to assessment |
 
+The v3 workflow expresses these states as response modes:
+
+- `socratic_question`
+- `hint`
+- `explain_concept`
+- `partial_answer`
+- `full_answer`
+
 ## Data Ownership
 
 Supabase stores:
@@ -43,18 +49,17 @@ Supabase stores:
 - Telegram identity mapping
 - student profiles
 - chat history
-- tutoring sessions
-- concept mastery
+- attempt counts
+- mastery score
+- current topic
 - misconception records
-- assessment results
-- scoring history
-- RAG documents and chunks
+- completed topics
+- lesson chunks and sources for RAG
 
 ## Knowledge Base
 
-The MVP uses Supabase Vector/pgvector so application data and retrieval data stay together. RAGFlow can be added later for complex textbooks, scanned PDFs, diagrams, tables, and citation-heavy ingestion.
+The recommended v3 workflow uses Supabase Vector/pgvector through `lesson_chunks` and lesson similarity search. RAGFlow can be added later for complex textbooks, scanned PDFs, diagrams, tables, and citation-heavy ingestion.
 
 ## Optional Langflow
 
 Langflow is not required for the MVP. Add it only if you want a separate visual environment for tutor-chain experiments, retriever/reranker variants, or a reusable tutor API called by n8n.
-
