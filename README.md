@@ -39,7 +39,7 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 ## Features
 
 - Telegram-first student interface
-- n8n workflow blueprints for both a simple agent canvas and a fuller analytics workflow
+- n8n workflow blueprints for an enhanced adaptive tutor, a simple agent canvas, and a fuller analytics workflow
 - Supabase schema for profiles, chat memory, mastery, misconceptions, assessments, and RAG chunks
 - Socratic tutor prompt template
 - scoring evaluator prompt and mastery update formula
@@ -70,7 +70,7 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 | RAG ingestion | RAGFlow, optional | Parsing complex PDFs, diagrams, scanned documents, and case-study materials |
 | AI models | OpenAI | Socratic tutor replies, scoring, retrieval query rewriting |
 | Prompts | Markdown prompt templates | Tutor behavior, scoring rubric, and retrieval query generation |
-| Workflow assets | n8n JSON workflow + Code nodes | Importable Telegram tutoring automation |
+| Workflow assets | n8n JSON workflows + Code nodes | Importable Telegram tutoring automation |
 | Deployment | n8n Cloud or self-hosted, Supabase Cloud | MVP hosting and managed persistence |
 | Analytics | Supabase SQL, Metabase, or dashboard app | Teacher/admin mastery and progress tracking |
 
@@ -99,7 +99,7 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 2. Create a Supabase project.
 3. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor.
 4. Run [`supabase/seed_concepts.sql`](supabase/seed_concepts.sql).
-5. Import [`n8n/workflows/telegram-socratic-tutor.workflow.json`](n8n/workflows/telegram-socratic-tutor.workflow.json) into n8n.
+5. Import [`n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json) into n8n.
 6. Configure n8n credentials:
    - Telegram Bot API
    - Supabase Postgres
@@ -111,6 +111,20 @@ Why do earthquakes happen?
 ```
 
 Detailed setup steps are in [`docs/setup.md`](docs/setup.md).
+
+### Recommended Workflow
+
+Use [`n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json) for the best MVP experience.
+
+It includes:
+
+- automatic `student_profiles` table creation on first contact
+- persisted attempt count, mastery score, current topic, and misconceptions
+- intent classification for greetings, questions, answer attempts, clarification, and bypass attempts
+- adaptive response modes from Socratic question to hint, concept explanation, partial answer, and full answer
+- misconception detection for common Earth Science and disaster-geography errors
+- guardrails that block premature answer reveals
+- state updates after every Telegram exchange
 
 ### Simpler Agent-Style Workflow
 

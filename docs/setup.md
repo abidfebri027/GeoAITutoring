@@ -21,14 +21,16 @@ The schema uses `vector(1536)`, matching `text-embedding-3-small`. If you choose
 
 ## 3. n8n Workflow
 
-1. Import `n8n/workflows/telegram-socratic-tutor.workflow.json`.
+1. Import `n8n/workflows/geoai-enhanced-socratic-tutor-v2.workflow.json`.
 2. Configure credentials:
    - Telegram Bot API
    - Supabase Postgres
    - LLM provider API key
-3. Check the SQL query parameter expressions in each Postgres node, because n8n versions can differ slightly.
+3. Check the SQL query expressions in the `Load Student State` and `Update Student State` Postgres nodes, because n8n versions can differ slightly.
 4. Activate the workflow.
 5. Send a test message to the Telegram bot.
+
+The recommended v2 workflow creates its own lightweight `student_profiles` table on first contact. Run the full `supabase/schema.sql` only when you want the larger analytics schema with concept mastery, assessments, scoring history, and RAG tables.
 
 ## 4. First Test Messages
 
@@ -64,4 +66,3 @@ For production document ingestion, use RAGFlow for complex PDFs, scanned materia
 - Do not commit `.env` files.
 - Use a limited database user for n8n where possible.
 - Add teacher/admin dashboards only after the core Telegram loop is stable.
-
