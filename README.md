@@ -4,6 +4,12 @@
 
 The first learning domain is **natural disasters**: earthquakes, volcanoes, floods, tsunamis, landslides, climate hazards, mitigation, risk, vulnerability, exposure, and disaster case studies.
 
+## About
+
+GeoAITutoring is an AI-powered adaptive learning system for geography education. It uses Telegram as the student interface, n8n as the automation layer, Supabase for persistent learning memory, and retrieval-augmented generation to ground tutoring responses in disaster-geography learning materials.
+
+Instead of acting like a normal chatbot, the system guides students with Socratic questions, hints, misconception repair, short explanations, and adaptive assessments. The goal is to help students understand why disasters happen, how risk can be reduced, and how geographic concepts connect to real-world disaster events.
+
 ## Why This Exists
 
 Most AI chatbots answer a student's question immediately. This project is designed to behave more like a careful tutor:
@@ -128,4 +134,3 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the fuller plan.
 ## Security
 
 Never commit real credentials. Use `.env.example` as a template and store actual API keys inside n8n credentials or your deployment secret manager.
-
