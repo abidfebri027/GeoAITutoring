@@ -1,0 +1,187 @@
+{
+  "name": "GeoAI Agent Style Telegram Tutor",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -240,
+        320
+      ],
+      "id": "7fe2b7eb-ae3a-4dd5-9d28-telegram-trigger",
+      "name": "Telegram Trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "=You are GeoAI, a friendly Socratic AI tutor for Earth Science, Geography, and Disaster Mitigation.\n\nStudent context:\n- Student name: {{ $json.message.from.first_name || 'student' }}\n- Telegram user ID: {{ $json.message.from.id }}\n- Today: {{ $now.toFormat('yyyy-MM-dd') }}\n\nCore teaching behavior:\n1. Do not give the direct final answer too early.\n2. Start by asking one guiding question when the student asks a concept question.\n3. Give hints before giving a full explanation.\n4. Use positive encouragement and constructive feedback.\n5. Help the student reason step by step.\n6. If the student is stuck after repeated attempts, give a short explanation and then ask a check question.\n7. Focus on natural disasters and geography topics: earthquakes, volcanoes, floods, tsunamis, landslides, climate hazards, disaster risk, vulnerability, exposure, capacity, and mitigation.\n8. Keep Telegram replies concise and easy to read.\n9. Use light emojis when helpful, but do not overload every sentence.\n\nResponse style:\n- Address the student by name when natural.\n- Ask only one main question at a time.\n- Prefer: encouragement -> hint/question -> next step.\n- If the student says /start, greet them and invite them to ask about a geography or disaster topic.\n\nImportant:\nYou are a tutor, not an answer machine. Your main goal is understanding, not speed.",
+          "returnIntermediateSteps": false,
+          "enableStreaming": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        64,
+        320
+      ],
+      "id": "3912ac72-6185-4f62-9f93-orchestrator",
+      "name": "GeoAI Socratic Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -64,
+        560
+      ],
+      "id": "b6811879-d3cf-43ab-b241-gpt-model",
+      "name": "GPT 5 Mini",
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.message.from.id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        560
+      ],
+      "id": "1a6f4029-8142-4831-b5c7-postgres-memory",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        320
+      ],
+      "id": "f51d39cb-d07a-4a5f-bec3-send-message",
+      "name": "Send a text message",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "GeoAI Socratic Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT 5 Mini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "GeoAI Socratic Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "GeoAI Socratic Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GeoAI Socratic Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "geoai-agent-style-starter",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "telegram"
+    },
+    {
+      "name": "socratic-tutor"
+    },
+    {
+      "name": "geography-disasters"
+    },
+    {
+      "name": "agent-style"
+    }
+  ]
+}
+

@@ -39,7 +39,7 @@ Read the full design in [`docs/architecture.md`](docs/architecture.md).
 ## Features
 
 - Telegram-first student interface
-- n8n workflow blueprint for the tutoring loop
+- n8n workflow blueprints for both a simple agent canvas and a fuller analytics workflow
 - Supabase schema for profiles, chat memory, mastery, misconceptions, assessments, and RAG chunks
 - Socratic tutor prompt template
 - scoring evaluator prompt and mastery update formula
@@ -111,6 +111,20 @@ Why do earthquakes happen?
 ```
 
 Detailed setup steps are in [`docs/setup.md`](docs/setup.md).
+
+### Simpler Agent-Style Workflow
+
+If you prefer a cleaner n8n canvas that looks like a native AI Agent workflow, import [`n8n/workflows/geoai-agent-style.workflow.json`](n8n/workflows/geoai-agent-style.workflow.json) instead.
+
+This version uses:
+
+```text
+Telegram Trigger -> GeoAI Socratic Agent -> Send Telegram Message
+                      |-> GPT 5 Mini
+                      `-> Postgres Chat Memory
+```
+
+Use the fuller `telegram-socratic-tutor.workflow.json` when you want explicit Supabase mastery tables, scoring history, and structured learning analytics.
 
 ## Important Tutor Rule
 
