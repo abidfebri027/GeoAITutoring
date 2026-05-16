@@ -158,6 +158,29 @@ Telegram Trigger -> GeoAI Socratic Agent -> Send Telegram Message
 
 Use `geoai-enhanced-socratic-tutor-v2.workflow.json` when you want the adaptive tutor without RAG. Use the fuller `telegram-socratic-tutor.workflow.json` when you want explicit Supabase mastery tables, scoring history, and structured learning analytics.
 
+## Penjelasan Node Workflow v3
+
+Bagian ini menjelaskan fungsi setiap node pada workflow [`geoai-enhanced-socratic-tutor-v3.workflow.json`](n8n/workflows/geoai-enhanced-socratic-tutor-v3.workflow.json).
+
+| Node | Fungsi |
+| --- | --- |
+| Telegram Trigger | Menerima pesan masuk dari siswa melalui bot Telegram dan memulai workflow. |
+| Load Student State | Mengambil atau membuat profil siswa di Postgres berdasarkan Telegram user ID, termasuk attempt count, mastery score, topik aktif, misconception, dan completed topics. |
+| Prepare Context | Menyatukan data Telegram dan database menjadi konteks belajar yang rapi. Node ini mendeteksi intent, command, bahasa, request hint, bypass attempt, misconception, difficulty level, dan spaced repetition cue. |
+| Is Command? | Memisahkan pesan command seperti `/start`, `/help`, `/progress`, `/topic`, atau `/reset` dari pesan belajar biasa. |
+| Command DB Update | Memperbarui state database untuk command tertentu, terutama reset attempt count saat siswa menggunakan `/reset`. |
+| Send Command Response | Mengirim balasan langsung untuk command Telegram tanpa memanggil AI Agent. |
+| Get Query Embedding | Mengubah pertanyaan siswa menjadi embedding menggunakan OpenAI agar sistem bisa mencari materi berdasarkan makna, bukan hanya kata yang sama persis. |
+| Format Embedding | Mengubah array embedding dari OpenAI menjadi format string pgvector yang bisa digunakan oleh PostgreSQL. |
+| Search Lesson Chunks | Mencari potongan materi paling relevan di tabel `lesson_chunks` menggunakan similarity search berbasis pgvector. |
+| Format RAG Context | Merapikan hasil pencarian RAG menjadi konteks pembelajaran yang dapat dibaca oleh AI Agent. |
+| Orchestrator Agent | AI tutor utama yang membuat respons Socratic berdasarkan pesan siswa, profil belajar, attempt count, mastery score, misconception, difficulty level, bahasa, dan konteks RAG. |
+| GPT-4o Mini | Model bahasa yang digunakan oleh Orchestrator Agent untuk menghasilkan respons tutor. |
+| Postgres Chat Memory1 | Menyimpan memori percakapan berdasarkan Telegram user ID agar tutor memahami konteks percakapan sebelumnya. |
+| Guardrail Gate | Memeriksa apakah respons AI terlalu cepat membocorkan jawaban. Node ini juga mengatur attempt count, mastery score, topic progression, completed topics, dan pencatatan misconception baru. |
+| Update Student State | Menyimpan perkembangan terbaru siswa ke Postgres setelah setiap interaksi. |
+| Send a text message | Mengirim `finalResponse` dari Guardrail Gate ke Telegram sebagai balasan akhir untuk siswa. |
+
 ## Important Tutor Rule
 
 The LLM should not freely decide when to reveal the final answer. n8n computes an `allowed_action`, and the tutor prompt must obey it.
