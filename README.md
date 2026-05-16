@@ -178,10 +178,10 @@ Starter chunks are included without embeddings, so they will not appear in vecto
 
 ## Roadmap
 
-- **MVP:** Telegram tutor, Supabase memory, Socratic prompt, basic scoring.
-- **V1:** automatic embeddings, misconception taxonomy, assessment bank, teacher dashboard.
-- **V2:** RAGFlow ingestion, reranking, bilingual tutoring, spaced repetition.
-- **Production:** evaluation set, rate limits, privacy review, observability, backups.
+- **MVP - Completed Proof of Concept:** Telegram tutor, Supabase memory, Socratic prompt, adaptive attempt tracking, misconception guardrails, and basic scoring are implemented as a working proof of concept.
+- **V1 - Learning Intelligence Research:** automatic embeddings, a structured misconception taxonomy, an assessment question bank, and a teacher dashboard will be explored to measure learning progress more rigorously.
+- **V2 - Advanced RAG and Personalization Research:** RAGFlow ingestion, reranking, bilingual tutoring, and spaced repetition will be investigated to improve retrieval quality, language accessibility, and long-term retention.
+- **Production - Deployment and Safety Research:** evaluation sets, rate limits, privacy review, observability, and backups will be developed to prepare the system for reliable classroom or institutional use.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the fuller plan.
 
